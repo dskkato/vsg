@@ -42,6 +42,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let amp = (sin(2.0*pi*(10.0*pos.x - f32(t) / 60.0)) + 1.0) / 2.0;
         return vec4<f32>(amp, amp, amp, 1.0);
     } else {
-        return vec4<f32>(0.0, 0.0, 0.0, 0.0);
+        return vec4<f32>(0.0, 0.0, 0.0, 0.2);
     }
 }
