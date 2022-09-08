@@ -1,5 +1,5 @@
 use cgmath::prelude::*;
-use std::{f32::consts::PI, iter};
+use std::iter;
 use wgpu::util::DeviceExt;
 use winit::{
     event::*,
