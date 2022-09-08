@@ -49,22 +49,6 @@ impl ClockUniform {
     }
 }
 
-#[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct GratingParamsUniform {
-    x: f32,
-    y: f32,
-}
-
-impl GratingParamsUniform {
-    fn new() -> Self {
-        Self {
-            x: 0.3f32,
-            y: 0.0f32,
-        }
-    }
-}
-
 struct Instance {
     position: cgmath::Vector3<f32>,
     rotation: cgmath::Quaternion<f32>,
@@ -137,35 +121,30 @@ struct App {
     clock_uniform: ClockUniform,
     clock_buffer: wgpu::Buffer,
     clock_bind_group: wgpu::BindGroup,
-    #[allow(dead_code)]
-    params_uniform: GratingParamsUniform,
-    #[allow(dead_code)]
-    params_buffer: wgpu::Buffer,
-    params_bind_group: wgpu::BindGroup,
     instances: Vec<Instance>,
     instance_buffer: wgpu::Buffer,
 }
 
-fn create_vertices(n: u32) -> (Vec<Vertex>, Vec<u16>) {
-    let mut v = vec![Vertex {
-        position: [0.0, 0.0, 0.0],
-        color: [1.0, 1.0, 1.0],
-    }];
-    let mut idx = vec![];
-    for i in 0..n {
-        let angle = 2.0 * PI * i as f32 / n as f32;
-        let x = angle.cos();
-        let y = angle.sin();
-        v.push(Vertex {
-            position: [x, y, 0.0],
-            color: [0.5, 0.0, 0.5],
-        });
-
-        idx.push(0);
-        idx.push(i as u16 + 1);
-        idx.push(i as u16 + 2);
-    }
-    *idx.last_mut().unwrap() = 1;
+fn create_vertices(_n: u32) -> (Vec<Vertex>, Vec<u16>) {
+    let v = vec![
+        Vertex {
+            position: [-0.5, 0.5, 0.0],
+            color: [1.0, 1.0, 1.0],
+        },
+        Vertex {
+            position: [-0.5, -0.5, 0.0],
+            color: [1.0, 1.0, 1.0],
+        },
+        Vertex {
+            position: [0.5, -0.5, 0.0],
+            color: [1.0, 1.0, 1.0],
+        },
+        Vertex {
+            position: [0.5, 0.5, 0.0],
+            color: [1.0, 1.0, 1.0],
+        },
+    ];
+    let idx = vec![0, 1, 2, 0, 2, 3];
 
     (v, idx)
 }
@@ -239,37 +218,8 @@ impl App {
             label: Some("clock_bind_group"),
         });
 
-        let params_uniform = GratingParamsUniform::new();
-        let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Grating params Buffer"),
-            contents: bytemuck::cast_slice(&[params_uniform]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let params_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-                label: Some("params_bind_group_layout"),
-            });
-        let params_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &params_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: params_buffer.as_entire_binding(),
-            }],
-            label: Some("params_bind_group"),
-        });
-
-        let instances = (0..4)
+        const NUM_INSTANCES: u32 = 4;
+        let instances = (0..NUM_INSTANCES)
             .map(|x| {
                 let position = cgmath::Vector3 {
                     x: x as f32 / 2.0,
@@ -298,7 +248,7 @@ impl App {
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[&clock_bind_group_layout, &params_bind_group_layout],
+                bind_group_layouts: &[&clock_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
@@ -340,7 +290,7 @@ impl App {
             multiview: None,
         });
 
-        let num_vertices = 5;
+        let num_vertices = 4;
         let (v, idx) = create_vertices(num_vertices);
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Vertex Buffer"),
@@ -369,9 +319,6 @@ impl App {
             clock_uniform,
             clock_buffer,
             clock_bind_group,
-            params_uniform,
-            params_buffer,
-            params_bind_group,
             instances,
             instance_buffer,
         }
@@ -466,9 +413,9 @@ impl App {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.2,
-                            b: 0.3,
+                            r: 0.5,
+                            g: 0.5,
+                            b: 0.5,
                             a: 1.0,
                         }),
                         store: true,
@@ -479,7 +426,6 @@ impl App {
 
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.clock_bind_group, &[]);
-            render_pass.set_bind_group(1, &self.params_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
@@ -497,7 +443,10 @@ pub async fn run() {
     env_logger::init();
 
     let event_loop = EventLoop::new();
-    let window = WindowBuilder::new().build(&event_loop).unwrap();
+    let window = WindowBuilder::new()
+        .with_title("VSG")
+        .build(&event_loop)
+        .unwrap();
 
     let mut app = App::new(&window).await;
 
