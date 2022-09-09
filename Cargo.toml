@@ -13,3 +13,6 @@ log = "0.4"
 image = "0.24"
 wgpu = "0.13"
 cgmath = "0.18"
+imgui = "0.8"
+imgui-wgpu = "0.20.0"
+imgui-winit-support = { version = "0.8", default-features = false, features = ["winit-26"] }

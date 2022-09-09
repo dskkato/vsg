@@ -1,7 +1,11 @@
 use cgmath::prelude::*;
-use std::iter;
+use imgui::*;
+use imgui_wgpu::{Renderer, RendererConfig};
+use imgui_winit_support::WinitPlatform;
+use std::{iter, time::Instant};
 use wgpu::util::DeviceExt;
 use winit::{
+    dpi::PhysicalSize,
     event::*,
     event_loop::{ControlFlow, EventLoop},
     window::{Window, WindowBuilder},
@@ -123,6 +127,12 @@ struct App {
     clock_bind_group: wgpu::BindGroup,
     instances: Vec<Instance>,
     instance_buffer: wgpu::Buffer,
+    // imgui
+    pub imgui: Context,
+    pub platform: WinitPlatform,
+    renderer: Renderer,
+    last_frame: Instant,
+    last_cursor: Option<MouseCursor>,
 }
 
 fn create_vertices(_n: u32) -> (Vec<Vertex>, Vec<u16>) {
@@ -184,6 +194,43 @@ impl App {
         };
         surface.configure(&device, &config);
 
+        // Set up dear imgui
+        let hidpi_factor = window.scale_factor();
+        let mut imgui = imgui::Context::create();
+        let mut platform = imgui_winit_support::WinitPlatform::init(&mut imgui);
+        platform.attach_window(
+            imgui.io_mut(),
+            window,
+            imgui_winit_support::HiDpiMode::Default,
+        );
+        imgui.set_ini_filename(None);
+
+        let font_size = (13.0 * hidpi_factor) as f32;
+        imgui.io_mut().font_global_scale = (1.0 / hidpi_factor) as f32;
+
+        imgui.fonts().add_font(&[FontSource::DefaultFontData {
+            config: Some(imgui::FontConfig {
+                oversample_h: 1,
+                pixel_snap_h: true,
+                size_pixels: font_size,
+                ..Default::default()
+            }),
+        }]);
+
+        //
+        // Set up dear imgui wgpu renderer
+        //
+        let renderer_config = RendererConfig {
+            texture_format: config.format,
+            ..Default::default()
+        };
+
+        let renderer = Renderer::new(&mut imgui, &device, &queue, renderer_config);
+
+        let last_frame = std::time::Instant::now();
+
+        let last_cursor = None;
+
         let fname = "shaders/shader.wgsl";
         let wgsl = std::fs::read_to_string(fname).unwrap();
 
@@ -237,7 +284,7 @@ impl App {
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Instance Buffer"),
             contents: bytemuck::cast_slice(&instance_data),
-            usage: wgpu::BufferUsages::VERTEX,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -321,6 +368,11 @@ impl App {
             clock_bind_group,
             instances,
             instance_buffer,
+            imgui,
+            platform,
+            renderer,
+            last_frame,
+            last_cursor,
         }
     }
 
@@ -354,16 +406,33 @@ impl App {
                 }
                 _ => false,
             },
+            WindowEvent::CursorMoved { position, .. } => {
+                self.instances[0].position.x = ((position.x / 800.0) * 2.0 - 1.0) as f32;
+                self.instances[0].position.y = ((position.y / 600.0) * (-2.0) + 1.0) as f32;
+
+                false
+            }
             _ => false,
         }
     }
 
     fn update(&mut self) {
         self.clock_uniform.tick();
+
         self.queue.write_buffer(
             &self.clock_buffer,
             0,
             bytemuck::cast_slice(&[self.clock_uniform]),
+        );
+        let instance_data = self
+            .instances
+            .iter()
+            .map(Instance::to_raw)
+            .collect::<Vec<_>>();
+        self.queue.write_buffer(
+            &self.instance_buffer,
+            0,
+            bytemuck::cast_slice(&instance_data),
         );
 
         if self.update {
@@ -393,17 +462,51 @@ impl App {
         }
     }
 
-    fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+    fn render(&mut self, window: &Window) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
-        let view = output
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
+        // just after flip swap chain
+        let delta_s = self.last_frame.elapsed();
+        let now = Instant::now();
+        self.imgui.io_mut().update_delta_time(now - self.last_frame);
+        self.last_frame = now;
+
+        // imgui part
+        self.platform
+            .prepare_frame(self.imgui.io_mut(), window)
+            .expect("Failed to prepare frame");
+        let ui = self.imgui.frame();
+
+        {
+            let window = imgui::Window::new("Hello world");
+            window
+                .size([300.0, 100.0], Condition::FirstUseEver)
+                .build(&ui, || {
+                    ui.text("Hello world!");
+                    ui.text("This...is...imguii-rs on WGPU!");
+                    ui.separator();
+                    let mouse_pos = ui.io().mouse_pos;
+                    ui.text(format!(
+                        "Mouse Position: ({:.1},{:.1})",
+                        mouse_pos[0], mouse_pos[1]
+                    ));
+                    ui.text(format!("Frametime: {:.1}", delta_s.as_secs_f64() * 1000.0));
+                });
+        }
 
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Render Encoder"),
             });
+
+        if self.last_cursor != ui.mouse_cursor() {
+            self.last_cursor = ui.mouse_cursor();
+            self.platform.prepare_render(&ui, window);
+        }
+
+        let view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
 
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -430,6 +533,10 @@ impl App {
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             render_pass.draw_indexed(0..self.num_indices, 0, 0..self.instances.len() as u32);
+
+            self.renderer
+                .render(ui.render(), &self.queue, &self.device, &mut render_pass)
+                .expect("Rendering failed");
         }
 
         self.queue.submit(iter::once(encoder.finish()));
@@ -445,6 +552,7 @@ pub async fn run() {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new()
         .with_title("VSG")
+        .with_inner_size(PhysicalSize::new(800, 600))
         .build(&event_loop)
         .unwrap();
 
@@ -482,7 +590,7 @@ pub async fn run() {
             }
             Event::RedrawRequested(window_id) if window_id == window.id() => {
                 app.update();
-                match app.render() {
+                match app.render(&window) {
                     Ok(_) => {}
                     // Reconfigure the surface if it's lost or outdated
                     Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
@@ -501,5 +609,8 @@ pub async fn run() {
             }
             _ => {}
         }
+
+        app.platform
+            .handle_event(app.imgui.io_mut(), &window, &event);
     });
 }
