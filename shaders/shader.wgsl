@@ -42,8 +42,16 @@ fn vs_main(
     return out;
 }
 
+struct GratingParams {
+    sf: f32, // spatial frequency
+    _tf: f32, // temporal frequency
+    phase: f32,
+    contrast: f32,
+    _tick:f32,
+};
+
 @group(0) @binding(0)
-var<uniform> t: u32;
+var<uniform> t: GratingParams;
 
 let pi = 3.14159;
 
@@ -52,7 +60,7 @@ let pi = 3.14159;
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if distance(in.position, vec3<f32>(0.0, 0.0, 0.0)) < 0.5 {
         let pos = in.position;
-        let amp = (sin(2.0*pi*(5.0*pos.x - f32(t) / 60.0)) + 1.0) / 2.0;
+        let amp = (t.contrast * sin(2.0*pi*(t.sf * pos.x - t.phase)) + 1.0) / 2.0;
         return vec4<f32>(amp, amp, amp, 1.0);
     } else {
         return vec4<f32>(0.0, 0.0, 0.0, 0.2);

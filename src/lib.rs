@@ -41,15 +41,28 @@ impl Vertex {
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct ClockUniform(u32);
+struct GratingParamsUniform {
+    sf: f32,
+    tf: f32,
+    phase: f32,
+    contrast: f32,
+    tick: f32,
+}
 
-impl ClockUniform {
+impl GratingParamsUniform {
     fn new() -> Self {
-        Self(0)
+        GratingParamsUniform {
+            sf: 5.0,
+            tf: 2.0,
+            phase: 0.0,
+            contrast: 0.7,
+            tick: 0.0,
+        }
     }
 
     fn tick(&mut self) {
-        self.0 += 1;
+        self.tick += 1.0 / 60.0;
+        self.phase = self.tf * self.tick;
     }
 }
 
@@ -63,10 +76,11 @@ impl Projection {
     }
 
     fn to_raw(&self) -> ProjectionUniform {
+        // cgmath::ortho(-1.0, 1.0, -self.aspect, self.aspect, 1.0, -1.0); // これに相当するMatrix4
         ProjectionUniform {
             view: [
-                [1.0 / self.aspect, 0.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0 / self.aspect, 0.0, 0.0],
                 [0.0, 0.0, 1.0, 0.0],
                 [0.0, 0.0, 0.0, 1.0],
             ],
@@ -152,10 +166,10 @@ struct App {
     index_buffer: wgpu::Buffer,
     num_indices: u32,
     update: bool,
-    // clock
-    clock_uniform: ClockUniform,
-    clock_buffer: wgpu::Buffer,
-    clock_bind_group: wgpu::BindGroup,
+    // grating params
+    gratingp_uniform: GratingParamsUniform,
+    gratingp_buffer: wgpu::Buffer,
+    gratingp_bind_group: wgpu::BindGroup,
     instances: Vec<Instance>,
     instance_buffer: wgpu::Buffer,
     // imgui
@@ -265,14 +279,14 @@ impl App {
         let fname = "shaders/shader.wgsl";
         let wgsl = std::fs::read_to_string(fname).unwrap();
 
-        let clock_uniform = ClockUniform::new();
-        let clock_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Clock Buffer"),
-            contents: bytemuck::cast_slice(&[clock_uniform]),
+        let gratingp_uniform = GratingParamsUniform::new();
+        let gratingp_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Grating Params Buffer"),
+            contents: bytemuck::cast_slice(&[gratingp_uniform]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let clock_bind_group_layout =
+        let gratingp_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
@@ -284,16 +298,16 @@ impl App {
                     },
                     count: None,
                 }],
-                label: Some("clock_bind_group_layout"),
+                label: Some("gratingp_bind_group_layout"),
             });
 
-        let clock_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &clock_bind_group_layout,
+        let gratingp_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &gratingp_bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
-                resource: clock_buffer.as_entire_binding(),
+                resource: gratingp_buffer.as_entire_binding(),
             }],
-            label: Some("clock_bind_group"),
+            label: Some("gratingp_bind_group"),
         });
 
         let proj = Projection::new(size.width as f32 / size.height as f32);
@@ -358,7 +372,7 @@ impl App {
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[&clock_bind_group_layout, &proj_bind_group_layout],
+                bind_group_layouts: &[&gratingp_bind_group_layout, &proj_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
@@ -429,9 +443,9 @@ impl App {
             index_buffer,
             num_indices,
             update: false,
-            clock_uniform,
-            clock_buffer,
-            clock_bind_group,
+            gratingp_uniform,
+            gratingp_buffer,
+            gratingp_bind_group,
             instances,
             instance_buffer,
             imgui,
@@ -449,7 +463,7 @@ impl App {
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
 
-            self.proj = Projection::new(new_size.width as f32 / new_size.height as f32);
+            self.proj = Projection::new(new_size.height as f32 / new_size.width as f32);
             let proj_uniform = self.proj.to_raw();
             self.queue
                 .write_buffer(&self.proj_buffer, 0, bytemuck::cast_slice(&[proj_uniform]));
@@ -479,9 +493,10 @@ impl App {
             },
             WindowEvent::CursorMoved { position, .. } => {
                 self.instances[0].position.x =
-                    ((position.x / self.size.width as f64) * 2.0 - 1.0) as f32 * self.proj.aspect;
-                self.instances[0].position.y =
-                    ((position.y / self.size.height as f64) * (-2.0) + 1.0) as f32;
+                    ((position.x / self.size.width as f64) * 2.0 - 1.0) as f32;
+                self.instances[0].position.y = ((position.y / self.size.height as f64) * (-2.0)
+                    + 1.0) as f32
+                    * self.proj.aspect;
 
                 false
             }
@@ -490,12 +505,12 @@ impl App {
     }
 
     fn update(&mut self) {
-        self.clock_uniform.tick();
+        self.gratingp_uniform.tick();
 
         self.queue.write_buffer(
-            &self.clock_buffer,
+            &self.gratingp_buffer,
             0,
-            bytemuck::cast_slice(&[self.clock_uniform]),
+            bytemuck::cast_slice(&[self.gratingp_uniform]),
         );
 
         let instance_data = self
@@ -602,7 +617,7 @@ impl App {
             });
 
             render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.clock_bind_group, &[]);
+            render_pass.set_bind_group(0, &self.gratingp_bind_group, &[]);
             render_pass.set_bind_group(1, &self.proj_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
