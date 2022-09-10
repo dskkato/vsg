@@ -450,6 +450,9 @@ impl App {
             self.surface.configure(&self.device, &self.config);
 
             self.proj = Projection::new(new_size.width as f32 / new_size.height as f32);
+            let proj_uniform = self.proj.to_raw();
+            self.queue
+                .write_buffer(&self.proj_buffer, 0, bytemuck::cast_slice(&[proj_uniform]));
         }
     }
     fn input(&mut self, event: &WindowEvent) -> bool {
@@ -494,10 +497,6 @@ impl App {
             0,
             bytemuck::cast_slice(&[self.clock_uniform]),
         );
-
-        let proj_uniform = self.proj.to_raw();
-        self.queue
-            .write_buffer(&self.proj_buffer, 0, bytemuck::cast_slice(&[proj_uniform]));
 
         let instance_data = self
             .instances
