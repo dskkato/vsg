@@ -53,6 +53,33 @@ impl ClockUniform {
     }
 }
 
+struct Projection {
+    pub aspect: f32,
+}
+
+impl Projection {
+    fn new(aspect: f32) -> Projection {
+        Projection { aspect }
+    }
+
+    fn to_raw(&self) -> ProjectionUniform {
+        ProjectionUniform {
+            view: [
+                [1.0 / self.aspect, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct ProjectionUniform {
+    view: [[f32; 4]; 4],
+}
+
 struct Instance {
     position: cgmath::Vector3<f32>,
     rotation: cgmath::Quaternion<f32>,
@@ -115,6 +142,10 @@ struct App {
     config: wgpu::SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
     render_pipeline: wgpu::RenderPipeline,
+    // view
+    proj: Projection,
+    proj_buffer: wgpu::Buffer,
+    proj_bind_group: wgpu::BindGroup,
     // for vertices
     num_vertices: u32,
     vertex_buffer: wgpu::Buffer,
@@ -265,6 +296,38 @@ impl App {
             label: Some("clock_bind_group"),
         });
 
+        let proj = Projection::new(size.width as f32 / size.height as f32);
+        let proj_uniform = proj.to_raw();
+        let proj_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Proj Buffer"),
+            contents: bytemuck::cast_slice(&[proj_uniform]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let proj_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+                label: Some("proj_bind_group_layout"),
+            });
+
+        let proj_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &proj_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: proj_buffer.as_entire_binding(),
+            }],
+            label: Some("proj_bind_group"),
+        });
+
         const NUM_INSTANCES: u32 = 4;
         let instances = (0..NUM_INSTANCES)
             .map(|x| {
@@ -295,7 +358,7 @@ impl App {
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[&clock_bind_group_layout],
+                bind_group_layouts: &[&clock_bind_group_layout, &proj_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
@@ -358,6 +421,9 @@ impl App {
             config,
             size,
             render_pipeline,
+            proj,
+            proj_buffer,
+            proj_bind_group,
             num_vertices,
             vertex_buffer,
             index_buffer,
@@ -382,6 +448,8 @@ impl App {
             self.config.width = new_size.width;
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
+
+            self.proj = Projection::new(new_size.width as f32 / new_size.height as f32);
         }
     }
     fn input(&mut self, event: &WindowEvent) -> bool {
@@ -407,8 +475,10 @@ impl App {
                 _ => false,
             },
             WindowEvent::CursorMoved { position, .. } => {
-                self.instances[0].position.x = ((position.x / 800.0) * 2.0 - 1.0) as f32;
-                self.instances[0].position.y = ((position.y / 600.0) * (-2.0) + 1.0) as f32;
+                self.instances[0].position.x =
+                    ((position.x / self.size.width as f64) * 2.0 - 1.0) as f32 * self.proj.aspect;
+                self.instances[0].position.y =
+                    ((position.y / self.size.height as f64) * (-2.0) + 1.0) as f32;
 
                 false
             }
@@ -424,6 +494,11 @@ impl App {
             0,
             bytemuck::cast_slice(&[self.clock_uniform]),
         );
+
+        let proj_uniform = self.proj.to_raw();
+        self.queue
+            .write_buffer(&self.proj_buffer, 0, bytemuck::cast_slice(&[proj_uniform]));
+
         let instance_data = self
             .instances
             .iter()
@@ -529,6 +604,7 @@ impl App {
 
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.clock_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.proj_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
