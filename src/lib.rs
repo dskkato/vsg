@@ -47,16 +47,20 @@ struct GratingParamsUniform {
     phase: f32,
     contrast: f32,
     tick: f32,
+    diameter: f32,
+    sigma: f32, // Gaussian window envelop, if sigma < 0.0, apply no window
 }
 
 impl GratingParamsUniform {
     fn new() -> Self {
         GratingParamsUniform {
             sf: 5.0,
-            tf: 2.0,
+            tf: 1.0,
             phase: 0.0,
             contrast: 0.7,
             tick: 0.0,
+            diameter: 0.5,
+            sigma: 0.15,
         }
     }
 
@@ -180,22 +184,22 @@ struct App {
     last_cursor: Option<MouseCursor>,
 }
 
-fn create_vertices(_n: u32) -> (Vec<Vertex>, Vec<u16>) {
+fn create_vertices(d: f32) -> (Vec<Vertex>, Vec<u16>) {
     let v = vec![
         Vertex {
-            position: [-0.5, 0.5, 0.0],
+            position: [-d, d, 0.0],
             color: [1.0, 1.0, 1.0],
         },
         Vertex {
-            position: [-0.5, -0.5, 0.0],
+            position: [-d, -d, 0.0],
             color: [1.0, 1.0, 1.0],
         },
         Vertex {
-            position: [0.5, -0.5, 0.0],
+            position: [d, -d, 0.0],
             color: [1.0, 1.0, 1.0],
         },
         Vertex {
-            position: [0.5, 0.5, 0.0],
+            position: [d, d, 0.0],
             color: [1.0, 1.0, 1.0],
         },
     ];
@@ -342,8 +346,8 @@ impl App {
             label: Some("proj_bind_group"),
         });
 
-        const NUM_INSTANCES: u32 = 4;
-        let instances = (0..NUM_INSTANCES)
+        let instances = (-1..2)
+            .step_by(2)
             .map(|x| {
                 let position = cgmath::Vector3 {
                     x: x as f32 / 2.0,
@@ -415,7 +419,7 @@ impl App {
         });
 
         let num_vertices = 4;
-        let (v, idx) = create_vertices(num_vertices);
+        let (v, idx) = create_vertices(gratingp_uniform.diameter);
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Vertex Buffer"),
             contents: bytemuck::cast_slice(&v),
@@ -526,7 +530,7 @@ impl App {
 
         if self.update {
             dbg!(self.num_vertices);
-            let (v, idx) = create_vertices(self.num_vertices);
+            let (v, idx) = create_vertices(self.gratingp_uniform.diameter);
             let vertex_buffer = self
                 .device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
