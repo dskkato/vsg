@@ -171,11 +171,9 @@ struct App {
     proj_buffer: wgpu::Buffer,
     proj_bind_group: wgpu::BindGroup,
     // for vertices
-    num_vertices: u32,
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     num_indices: u32,
-    update: bool,
     // grating params
     gratingp_uniform: GratingParamsUniform,
     gratingp_buffer: wgpu::Buffer,
@@ -424,7 +422,6 @@ impl App {
             multiview: None,
         });
 
-        let num_vertices = 4;
         let (v, idx) = create_vertices(gratingp_uniform.diameter);
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Vertex Buffer"),
@@ -448,11 +445,9 @@ impl App {
             proj,
             proj_buffer,
             proj_bind_group,
-            num_vertices,
             vertex_buffer,
             index_buffer,
             num_indices,
-            update: false,
             gratingp_uniform,
             gratingp_buffer,
             gratingp_bind_group,
@@ -479,35 +474,15 @@ impl App {
                 .write_buffer(&self.proj_buffer, 0, bytemuck::cast_slice(&[proj_uniform]));
         }
     }
+
     fn input(&mut self, event: &WindowEvent) -> bool {
         match event {
-            WindowEvent::KeyboardInput {
-                input:
-                    KeyboardInput {
-                        virtual_keycode: Some(keycode),
-                        ..
-                    },
-                ..
-            } => match keycode {
-                VirtualKeyCode::W | VirtualKeyCode::Up => {
-                    self.num_vertices += 1;
-                    self.update = true;
-                    true
-                }
-                VirtualKeyCode::S | VirtualKeyCode::Down => {
-                    self.num_vertices -= 1;
-                    self.update = true;
-                    true
-                }
-                _ => false,
-            },
             WindowEvent::CursorMoved { position, .. } => {
                 self.instances[0].position.x =
                     ((position.x / self.size.width as f64) * 2.0 - 1.0) as f32;
                 self.instances[0].position.y = ((position.y / self.size.height as f64) * (-2.0)
                     + 1.0) as f32
                     * self.proj.aspect;
-
                 false
             }
             _ => false,
@@ -533,32 +508,6 @@ impl App {
             0,
             bytemuck::cast_slice(&instance_data),
         );
-
-        if self.update {
-            dbg!(self.num_vertices);
-            let (v, idx) = create_vertices(self.gratingp_uniform.diameter);
-            let vertex_buffer = self
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Vertex Buffer"),
-                    contents: bytemuck::cast_slice(&v),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
-            let index_buffer = self
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Index Buffer"),
-                    contents: bytemuck::cast_slice(&idx),
-                    usage: wgpu::BufferUsages::INDEX,
-                });
-            let num_indices = idx.len() as u32;
-
-            self.vertex_buffer = vertex_buffer;
-            self.index_buffer = index_buffer;
-            self.num_indices = num_indices;
-
-            self.update = false;
-        }
     }
 
     fn render(&mut self, window: &Window) -> Result<(), wgpu::SurfaceError> {
