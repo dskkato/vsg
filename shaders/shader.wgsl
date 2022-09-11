@@ -50,6 +50,9 @@ struct GratingParams {
     _tick: f32,
     diameter: f32,
     sigma: f32,
+    red: f32,
+    blue: f32,
+    green: f32,
 };
 
 @group(0) @binding(0)
@@ -69,8 +72,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         else {
             let pos = in.position;
             let amp = exp(-(pow(pos.x, 2.0) + pow(pos.y, 2.0)) / (2.0 * pow(t.sigma, 2.0)));
-            let v = (amp * t.contrast * sin(2.0*pi*(t.sf * pos.x - t.phase)) + 1.0) / 2.0;
-            return vec4<f32>(v, v, v, 1.0);
+            let v = amp * t.contrast * sin(2.0*pi*(t.sf * pos.x - t.phase));
+            return vec4<f32>(t.red + v, t.green + v, t.blue + v, 1.0);
         }
     } else {
         return vec4<f32>(0.0, 0.0, 0.0, 0.0);

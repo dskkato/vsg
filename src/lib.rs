@@ -49,6 +49,9 @@ struct GratingParamsUniform {
     tick: f32,
     diameter: f32,
     sigma: f32, // Gaussian window envelop, if sigma < 0.0, apply no window
+    red: f32,
+    blue: f32,
+    green: f32,
 }
 
 impl GratingParamsUniform {
@@ -57,10 +60,13 @@ impl GratingParamsUniform {
             sf: 5.0,
             tf: 1.0,
             phase: 0.0,
-            contrast: 0.7,
+            contrast: 0.3,
             tick: 0.0,
             diameter: 0.5,
             sigma: 0.15,
+            red: 0.5,
+            blue: 0.4,
+            green: 0.3,
         }
     }
 
@@ -609,9 +615,9 @@ impl App {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.5,
-                            g: 0.5,
-                            b: 0.5,
+                            r: self.gratingp_uniform.red as f64,
+                            g: self.gratingp_uniform.green as f64,
+                            b: self.gratingp_uniform.blue as f64,
                             a: 1.0,
                         }),
                         store: true,
