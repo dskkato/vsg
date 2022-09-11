@@ -529,11 +529,11 @@ impl App {
         {
             let window = imgui::Window::new("VSG");
             window
-                .size([300.0, 100.0], Condition::FirstUseEver)
+                .size([300.0, 120.0], Condition::FirstUseEver)
                 .build(&ui, || {
                     ui.text("VSG");
                     ui.separator();
-                    ColorEdit::new("color_edit", &mut self.gratingp_uniform.color).build(&ui);
+                    ColorEdit::new("Color", &mut self.gratingp_uniform.color).build(&ui);
 
                     let mouse_pos = ui.io().mouse_pos;
                     ui.text(format!(
