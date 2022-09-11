@@ -49,9 +49,8 @@ struct GratingParamsUniform {
     tick: f32,
     diameter: f32,
     sigma: f32, // Gaussian window envelop, if sigma < 0.0, apply no window
-    red: f32,
-    blue: f32,
-    green: f32,
+    _padding: f32,
+    color: [f32; 4],
 }
 
 impl GratingParamsUniform {
@@ -64,9 +63,8 @@ impl GratingParamsUniform {
             tick: 0.0,
             diameter: 0.5,
             sigma: 0.15,
-            red: 0.5,
-            blue: 0.4,
-            green: 0.3,
+            _padding: 0.0,
+            color: [0.5, 0.4, 0.3, 1.0],
         }
     }
 
@@ -475,18 +473,19 @@ impl App {
         }
     }
 
-    fn input(&mut self, event: &WindowEvent) -> bool {
-        match event {
-            WindowEvent::CursorMoved { position, .. } => {
-                self.instances[0].position.x =
-                    ((position.x / self.size.width as f64) * 2.0 - 1.0) as f32;
-                self.instances[0].position.y = ((position.y / self.size.height as f64) * (-2.0)
-                    + 1.0) as f32
-                    * self.proj.aspect;
-                false
-            }
-            _ => false,
-        }
+    fn input(&mut self, _event: &WindowEvent) -> bool {
+        // match event {
+        //     WindowEvent::CursorMoved { position, .. } => {
+        //         self.instances[0].position.x =
+        //             ((position.x / self.size.width as f64) * 2.0 - 1.0) as f32;
+        //         self.instances[0].position.y = ((position.y / self.size.height as f64) * (-2.0)
+        //             + 1.0) as f32
+        //             * self.proj.aspect;
+        //         false
+        //     }
+        //     _ => false,
+        // }
+        false
     }
 
     fn update(&mut self) {
@@ -524,14 +523,18 @@ impl App {
             .expect("Failed to prepare frame");
         let ui = self.imgui.frame();
 
+        // make copy so that color update occurs at the same time between background and shader's one.
+        let color = self.gratingp_uniform.color;
+
         {
-            let window = imgui::Window::new("Hello world");
+            let window = imgui::Window::new("VSG");
             window
                 .size([300.0, 100.0], Condition::FirstUseEver)
                 .build(&ui, || {
-                    ui.text("Hello world!");
-                    ui.text("This...is...imguii-rs on WGPU!");
+                    ui.text("VSG");
                     ui.separator();
+                    ColorEdit::new("color_edit", &mut self.gratingp_uniform.color).build(&ui);
+
                     let mouse_pos = ui.io().mouse_pos;
                     ui.text(format!(
                         "Mouse Position: ({:.1},{:.1})",
@@ -564,10 +567,10 @@ impl App {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: self.gratingp_uniform.red as f64,
-                            g: self.gratingp_uniform.green as f64,
-                            b: self.gratingp_uniform.blue as f64,
-                            a: 1.0,
+                            r: color[0] as f64,
+                            g: color[1] as f64,
+                            b: color[2] as f64,
+                            a: color[3] as f64,
                         }),
                         store: true,
                     },

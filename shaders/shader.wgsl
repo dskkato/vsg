@@ -44,15 +44,14 @@ fn vs_main(
 
 struct GratingParams {
     sf: f32, // spatial frequency
-    _tf: f32, // temporal frequency
+    tf: f32, // temporal frequency
     phase: f32,
     contrast: f32,
-    _tick: f32,
+    tick: f32,
     diameter: f32,
     sigma: f32,
-    red: f32,
-    blue: f32,
-    green: f32,
+    padding: f32,
+    color: vec4<f32>,
 };
 
 @group(0) @binding(0)
@@ -63,18 +62,17 @@ let pi = 3.14159;
 // Fragment shader
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    if distance(in.position, vec3<f32>(0.0, 0.0, 0.0)) < t.diameter {
-        if t.sigma <= 0.0 {
-            let pos = in.position;
-            let v = (t.contrast * sin(2.0*pi*(t.sf * pos.x - t.phase)) + 1.0) / 2.0;
-            return vec4<f32>(v, v, v, 1.0);
+    let ctr = vec3<f32>(0.0, 0.0, 0.0);
+    if (distance(in.position, ctr) < t.diameter) {
+        let pos = in.position;
+        var amp: f32;
+        if (t.sigma <= 0.0) {
+            amp = 1.0;
+        } else {
+            amp = exp(-(pow(pos.x, 2.0) + pow(pos.y, 2.0)) / (2.0 * pow(t.sigma, 2.0)));
         }
-        else {
-            let pos = in.position;
-            let amp = exp(-(pow(pos.x, 2.0) + pow(pos.y, 2.0)) / (2.0 * pow(t.sigma, 2.0)));
-            let v = amp * t.contrast * sin(2.0*pi*(t.sf * pos.x - t.phase));
-            return vec4<f32>(t.red + v, t.green + v, t.blue + v, 1.0);
-        }
+        let v = amp * t.contrast * sin(2.0 * pi * (t.sf * pos.x - t.phase));
+        return vec4<f32>(t.color[0] + v, t.color[1] + v, t.color[2] + v, t.color[3]);
     } else {
         return vec4<f32>(0.0, 0.0, 0.0, 0.0);
     }
