@@ -15,7 +15,6 @@ use winit::{
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct Vertex {
     position: [f32; 3],
-    color: [f32; 3],
 }
 
 impl Vertex {
@@ -23,18 +22,11 @@ impl Vertex {
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    shader_location: 0,
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-                wgpu::VertexAttribute {
-                    offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
-                    shader_location: 1,
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-            ],
+            attributes: &[wgpu::VertexAttribute {
+                offset: 0,
+                shader_location: 0,
+                format: wgpu::VertexFormat::Float32x3,
+            }],
         }
     }
 }
@@ -190,19 +182,15 @@ fn create_vertices(d: f32) -> (Vec<Vertex>, Vec<u16>) {
     let v = vec![
         Vertex {
             position: [-d, d, 0.0],
-            color: [1.0, 1.0, 1.0],
         },
         Vertex {
             position: [-d, -d, 0.0],
-            color: [1.0, 1.0, 1.0],
         },
         Vertex {
             position: [d, -d, 0.0],
-            color: [1.0, 1.0, 1.0],
         },
         Vertex {
             position: [d, d, 0.0],
-            color: [1.0, 1.0, 1.0],
         },
     ];
     let idx = vec![0, 1, 2, 0, 2, 3];
