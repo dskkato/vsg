@@ -11,10 +11,14 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
+mod resources;
+mod texture;
+
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct Vertex {
     position: [f32; 3],
+    tex_coords: [f32; 2],
 }
 
 impl Vertex {
@@ -22,11 +26,18 @@ impl Vertex {
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[wgpu::VertexAttribute {
-                offset: 0,
-                shader_location: 0,
-                format: wgpu::VertexFormat::Float32x3,
-            }],
+            attributes: &[
+                wgpu::VertexAttribute {
+                    offset: 0,
+                    shader_location: 0,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                wgpu::VertexAttribute {
+                    offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
+                    shader_location: 1,
+                    format: wgpu::VertexFormat::Float32x2,
+                },
+            ],
         }
     }
 }
@@ -41,7 +52,7 @@ struct GratingParamsUniform {
     tick: f32,
     diameter: f32,
     sigma: f32, // Gaussian window envelop, if sigma < 0.0, apply no window
-    _padding: f32,
+    has_texture: u32,
     color: [f32; 4],
 }
 
@@ -53,10 +64,10 @@ impl GratingParamsUniform {
             phase: 0.0,
             contrast: 0.3,
             tick: 0.0,
-            diameter: 0.5,
+            diameter: 0.6,
             sigma: 0.15,
-            _padding: 0.0,
-            color: [0.5, 0.4, 0.3, 1.0],
+            has_texture: 0,
+            color: [0.5, 0.5, 0.5, 1.0],
         }
     }
 
@@ -160,6 +171,10 @@ struct App {
     proj: Projection,
     proj_buffer: wgpu::Buffer,
     proj_bind_group: wgpu::BindGroup,
+    // texture
+    #[allow(dead_code)]
+    texture: texture::Texture,
+    texture_bind_group: wgpu::BindGroup,
     // for vertices
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
@@ -181,16 +196,24 @@ struct App {
 fn create_vertices(d: f32) -> (Vec<Vertex>, Vec<u16>) {
     let v = vec![
         Vertex {
+            // top-left
             position: [-d, d, 0.0],
+            tex_coords: [0.0, 0.0],
         },
         Vertex {
+            // bottom-left
             position: [-d, -d, 0.0],
+            tex_coords: [0.0, 1.0],
         },
         Vertex {
+            // bottom-right
             position: [d, -d, 0.0],
+            tex_coords: [1.0, 1.0],
         },
         Vertex {
+            // top-right
             position: [d, d, 0.0],
+            tex_coords: [1.0, 0.0],
         },
     ];
     let idx = vec![0, 1, 2, 0, 2, 3];
@@ -273,6 +296,47 @@ impl App {
         let fname = "shaders/shader.wgsl";
         let wgsl = std::fs::read_to_string(fname).unwrap();
 
+        let texture =
+            resources::load_texture("macaque.jpg", &device, &queue).expect("Failed to load image.");
+
+        let texture_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                        count: None,
+                    },
+                ],
+                label: Some("texture_bind_group_layout"),
+            });
+
+        let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &texture_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&texture.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&texture.sampler),
+                },
+            ],
+            label: Some("texture_bind_group"),
+        });
+
         let gratingp_uniform = GratingParamsUniform::new();
         let gratingp_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Grating Params Buffer"),
@@ -346,7 +410,7 @@ impl App {
                 };
                 let rotation = cgmath::Quaternion::from_axis_angle(
                     cgmath::Vector3::unit_z(),
-                    cgmath::Deg(45.0 * x as f32),
+                    cgmath::Deg(0.0 * x as f32),
                 );
                 Instance { position, rotation }
             })
@@ -366,7 +430,11 @@ impl App {
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[&gratingp_bind_group_layout, &proj_bind_group_layout],
+                bind_group_layouts: &[
+                    &gratingp_bind_group_layout,
+                    &proj_bind_group_layout,
+                    &texture_bind_group_layout,
+                ],
                 push_constant_ranges: &[],
             });
 
@@ -434,6 +502,8 @@ impl App {
             vertex_buffer,
             index_buffer,
             num_indices,
+            texture,
+            texture_bind_group,
             gratingp_uniform,
             gratingp_buffer,
             gratingp_bind_group,
@@ -569,6 +639,7 @@ impl App {
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.gratingp_bind_group, &[]);
             render_pass.set_bind_group(1, &self.proj_bind_group, &[]);
+            render_pass.set_bind_group(2, &self.texture_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);

@@ -2,12 +2,14 @@
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
+    @location(1) tex_coords: vec2<f32>,
 };
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) color: vec3<f32>,
-    @location(1) position: vec3<f32>,
+    @location(1) position: vec2<f32>,
+    @location(2) tex_coords: vec2<f32>,
 };
 
 struct InstanceInput {
@@ -36,7 +38,8 @@ fn vs_main(
     );
     var out: VertexOutput;
     out.clip_position = view.proj * model_matrix * vec4<f32>(model.position, 1.0);
-    out.position = model.position;
+    out.position = model.position.xy;
+    out.tex_coords = model.tex_coords;
     return out;
 }
 
@@ -48,21 +51,30 @@ struct GratingParams {
     tick: f32,
     diameter: f32,
     sigma: f32,
-    padding: f32,
+    has_texture: u32,
     color: vec4<f32>,
 };
 
 @group(0) @binding(0)
 var<uniform> t: GratingParams;
 
+@group(2) @binding(0)
+var t_texture: texture_2d<f32>;
+@group(2) @binding(1)
+var s_texture: sampler;
+
 let pi = 3.14159;
 
 // Fragment shader
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let ctr = vec3<f32>(0.0, 0.0, 0.0);
+    if (t.has_texture > u32(0)) {
+        return textureSample(t_texture, s_texture, in.tex_coords.xy);
+    }
+    let ctr = vec2<f32>(0.0, 0.0);
+
     if (distance(in.position, ctr) < t.diameter) {
-        let pos = in.position;
+        let pos = in.position.xy;
         var amp: f32;
         if (t.sigma <= 0.0) {
             amp = 1.0;
