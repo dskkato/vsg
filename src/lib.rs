@@ -1,4 +1,3 @@
-use cgmath::prelude::*;
 use imgui::*;
 use imgui_wgpu::{Renderer, RendererConfig};
 use imgui_winit_support::WinitPlatform;
@@ -11,99 +10,17 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
+mod projection;
+use projection::Projection;
+
 mod resources;
 mod texture;
 
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct Vertex {
-    position: [f32; 3],
-    tex_coords: [f32; 2],
-}
+mod stim;
+use stim::grating::Grating;
 
-impl Vertex {
-    fn desc<'a>() -> wgpu::VertexBufferLayout<'a> {
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    shader_location: 0,
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-                wgpu::VertexAttribute {
-                    offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
-                    shader_location: 1,
-                    format: wgpu::VertexFormat::Float32x2,
-                },
-            ],
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct GratingParamsUniform {
-    sf: f32,
-    tf: f32,
-    phase: f32,
-    contrast: f32,
-    tick: f32,
-    diameter: f32,
-    sigma: f32, // Gaussian window envelop, if sigma < 0.0, apply no window
-    has_texture: u32,
-    color: [f32; 4],
-}
-
-impl GratingParamsUniform {
-    fn new() -> Self {
-        GratingParamsUniform {
-            sf: 5.0,
-            tf: 1.0,
-            phase: 0.0,
-            contrast: 0.3,
-            tick: 0.0,
-            diameter: 0.6,
-            sigma: 0.15,
-            has_texture: 0,
-            color: [0.5, 0.5, 0.5, 1.0],
-        }
-    }
-
-    fn tick(&mut self) {
-        self.tick += 1.0 / 60.0;
-        self.phase = self.tf * self.tick;
-    }
-}
-
-struct Projection {
-    pub aspect: f32,
-}
-
-impl Projection {
-    fn new(aspect: f32) -> Projection {
-        Projection { aspect }
-    }
-
-    fn to_raw(&self) -> ProjectionUniform {
-        // cgmath::ortho(-1.0, 1.0, -self.aspect, self.aspect, 1.0, -1.0); // これに相当するMatrix4
-        ProjectionUniform {
-            view: [
-                [1.0, 0.0, 0.0, 0.0],
-                [0.0, 1.0 / self.aspect, 0.0, 0.0],
-                [0.0, 0.0, 1.0, 0.0],
-                [0.0, 0.0, 0.0, 1.0],
-            ],
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct ProjectionUniform {
-    view: [[f32; 4]; 4],
-}
+mod vertex;
+use vertex::Vertex;
 
 struct Instance {
     position: cgmath::Vector3<f32>,
@@ -166,7 +83,7 @@ struct App {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
-    render_pipeline: wgpu::RenderPipeline,
+    bg_color: [f32; 4],
     // view
     proj: Projection,
     proj_buffer: wgpu::Buffer,
@@ -175,22 +92,14 @@ struct App {
     #[allow(dead_code)]
     texture: texture::Texture,
     texture_bind_group: wgpu::BindGroup,
-    // for vertices
-    vertex_buffer: wgpu::Buffer,
-    index_buffer: wgpu::Buffer,
-    num_indices: u32,
-    // grating params
-    gratingp_uniform: GratingParamsUniform,
-    gratingp_buffer: wgpu::Buffer,
-    gratingp_bind_group: wgpu::BindGroup,
-    instances: Vec<Instance>,
-    instance_buffer: wgpu::Buffer,
     // imgui
     pub imgui: Context,
     pub platform: WinitPlatform,
     renderer: Renderer,
     last_frame: Instant,
     last_cursor: Option<MouseCursor>,
+    // grating
+    grating: Grating,
 }
 
 fn create_vertices(d: f32) -> (Vec<Vertex>, Vec<u16>) {
@@ -198,22 +107,18 @@ fn create_vertices(d: f32) -> (Vec<Vertex>, Vec<u16>) {
         Vertex {
             // top-left
             position: [-d, d, 0.0],
-            tex_coords: [0.0, 0.0],
         },
         Vertex {
             // bottom-left
             position: [-d, -d, 0.0],
-            tex_coords: [0.0, 1.0],
         },
         Vertex {
             // bottom-right
             position: [d, -d, 0.0],
-            tex_coords: [1.0, 1.0],
         },
         Vertex {
             // top-right
             position: [d, d, 0.0],
-            tex_coords: [1.0, 0.0],
         },
     ];
     let idx = vec![0, 1, 2, 0, 2, 3];
@@ -293,9 +198,6 @@ impl App {
 
         let last_cursor = None;
 
-        let fname = "shaders/shader.wgsl";
-        let wgsl = std::fs::read_to_string(fname).unwrap();
-
         let texture =
             resources::load_texture("macaque.jpg", &device, &queue).expect("Failed to load image.");
 
@@ -337,37 +239,6 @@ impl App {
             label: Some("texture_bind_group"),
         });
 
-        let gratingp_uniform = GratingParamsUniform::new();
-        let gratingp_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Grating Params Buffer"),
-            contents: bytemuck::cast_slice(&[gratingp_uniform]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let gratingp_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-                label: Some("gratingp_bind_group_layout"),
-            });
-
-        let gratingp_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &gratingp_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: gratingp_buffer.as_entire_binding(),
-            }],
-            label: Some("gratingp_bind_group"),
-        });
-
         let proj = Projection::new(size.width as f32 / size.height as f32);
         let proj_uniform = proj.to_raw();
         let proj_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -400,94 +271,8 @@ impl App {
             label: Some("proj_bind_group"),
         });
 
-        let instances = (-1..2)
-            .step_by(2)
-            .map(|x| {
-                let position = cgmath::Vector3 {
-                    x: x as f32 / 2.0,
-                    y: 0.0,
-                    z: 1.0f32,
-                };
-                let rotation = cgmath::Quaternion::from_axis_angle(
-                    cgmath::Vector3::unit_z(),
-                    cgmath::Deg(0.0 * x as f32),
-                );
-                Instance { position, rotation }
-            })
-            .collect::<Vec<_>>();
-        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
-        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Instance Buffer"),
-            contents: bytemuck::cast_slice(&instance_data),
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Shader"),
-            source: wgpu::ShaderSource::Wgsl(wgsl.into()),
-        });
-
-        let render_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[
-                    &gratingp_bind_group_layout,
-                    &proj_bind_group_layout,
-                    &texture_bind_group_layout,
-                ],
-                push_constant_ranges: &[],
-            });
-
-        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Render Pipeline"),
-            layout: Some(&render_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[Vertex::desc(), InstanceRaw::desc()],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: config.format,
-                    blend: Some(wgpu::BlendState {
-                        color: wgpu::BlendComponent::OVER,
-                        alpha: wgpu::BlendComponent::REPLACE,
-                    }),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview: None,
-        });
-
-        let (v, idx) = create_vertices(gratingp_uniform.diameter);
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Vertex Buffer"),
-            contents: bytemuck::cast_slice(&v),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Index Buffer"),
-            contents: bytemuck::cast_slice(&idx),
-            usage: wgpu::BufferUsages::INDEX,
-        });
-        let num_indices = idx.len() as u32;
+        let bg_color = [0.5, 0.5, 0.5, 1.0];
+        let grating = Grating::new(&device, &proj_bind_group_layout);
 
         App {
             surface,
@@ -495,25 +280,18 @@ impl App {
             queue,
             config,
             size,
-            render_pipeline,
+            bg_color,
             proj,
             proj_buffer,
             proj_bind_group,
-            vertex_buffer,
-            index_buffer,
-            num_indices,
             texture,
             texture_bind_group,
-            gratingp_uniform,
-            gratingp_buffer,
-            gratingp_bind_group,
-            instances,
-            instance_buffer,
             imgui,
             platform,
             renderer,
             last_frame,
             last_cursor,
+            grating,
         }
     }
 
@@ -547,24 +325,7 @@ impl App {
     }
 
     fn update(&mut self) {
-        self.gratingp_uniform.tick();
-
-        self.queue.write_buffer(
-            &self.gratingp_buffer,
-            0,
-            bytemuck::cast_slice(&[self.gratingp_uniform]),
-        );
-
-        let instance_data = self
-            .instances
-            .iter()
-            .map(Instance::to_raw)
-            .collect::<Vec<_>>();
-        self.queue.write_buffer(
-            &self.instance_buffer,
-            0,
-            bytemuck::cast_slice(&instance_data),
-        );
+        self.grating.update(&self.queue);
     }
 
     fn render(&mut self, window: &Window) -> Result<(), wgpu::SurfaceError> {
@@ -582,7 +343,7 @@ impl App {
         let ui = self.imgui.frame();
 
         // make copy so that color update occurs at the same time between background and shader's one.
-        let color = self.gratingp_uniform.color;
+        let color = self.bg_color;
 
         {
             let window = imgui::Window::new("VSG");
@@ -591,7 +352,7 @@ impl App {
                 .build(&ui, || {
                     ui.text("VSG");
                     ui.separator();
-                    ColorEdit::new("Color", &mut self.gratingp_uniform.color).build(&ui);
+                    ColorEdit::new("Color", &mut self.bg_color).build(&ui);
 
                     let mouse_pos = ui.io().mouse_pos;
                     ui.text(format!(
@@ -636,14 +397,7 @@ impl App {
                 depth_stencil_attachment: None,
             });
 
-            render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.gratingp_bind_group, &[]);
-            render_pass.set_bind_group(1, &self.proj_bind_group, &[]);
-            render_pass.set_bind_group(2, &self.texture_bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            render_pass.draw_indexed(0..self.num_indices, 0, 0..self.instances.len() as u32);
+            self.grating.draw(&mut render_pass, &self.proj_bind_group);
 
             self.renderer
                 .render(ui.render(), &self.queue, &self.device, &mut render_pass)
