@@ -17,7 +17,7 @@ mod resources;
 mod texture;
 
 mod stim;
-use stim::grating::Grating;
+use stim::{grating::Grating, rect::Rect};
 
 mod vertex;
 use vertex::Vertex;
@@ -100,6 +100,8 @@ struct App {
     last_cursor: Option<MouseCursor>,
     // grating
     grating: Grating,
+    // rect
+    rect: Rect,
 }
 
 fn create_vertices(d: f32) -> (Vec<Vertex>, Vec<u16>) {
@@ -273,6 +275,7 @@ impl App {
 
         let bg_color = [0.5, 0.5, 0.5, 1.0];
         let grating = Grating::new(&device, &proj_bind_group_layout);
+        let rect = Rect::new(&device, &proj_bind_group_layout);
 
         App {
             surface,
@@ -292,6 +295,7 @@ impl App {
             last_frame,
             last_cursor,
             grating,
+            rect,
         }
     }
 
@@ -398,6 +402,7 @@ impl App {
             });
 
             self.grating.draw(&mut render_pass, &self.proj_bind_group);
+            self.rect.draw(&mut render_pass, &self.proj_bind_group);
 
             self.renderer
                 .render(ui.render(), &self.queue, &self.device, &mut render_pass)
