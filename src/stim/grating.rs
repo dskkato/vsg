@@ -2,12 +2,114 @@ use cgmath::prelude::*;
 use wgpu::include_wgsl;
 use wgpu::util::DeviceExt;
 
+use crate::create_vertices;
 use crate::vertex::Vertex;
-use crate::{create_vertices, Instance, InstanceRaw};
+
+struct Instance {
+    position: cgmath::Vector3<f32>,
+    rotation: cgmath::Quaternion<f32>,
+    params: GratingParams,
+}
+
+impl Instance {
+    fn to_raw(&self) -> InstanceRaw {
+        InstanceRaw {
+            model: (cgmath::Matrix4::from_translation(self.position)
+                * cgmath::Matrix4::from(self.rotation))
+            .into(),
+            params: self.params,
+        }
+    }
+}
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct GratingParamsUniform {
+struct InstanceRaw {
+    model: [[f32; 4]; 4],
+    params: GratingParams,
+}
+
+impl InstanceRaw {
+    fn desc<'a>() -> wgpu::VertexBufferLayout<'a> {
+        use std::mem;
+        wgpu::VertexBufferLayout {
+            array_stride: mem::size_of::<InstanceRaw>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &[
+                wgpu::VertexAttribute {
+                    offset: 0,
+                    shader_location: 5,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+                // A mat4 takes up 4 vertex slots as it is technically 4 vec4s. We need to define a slot
+                // for each vec4. We don't have to do this in code though.
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 4]>() as wgpu::BufferAddress,
+                    shader_location: 6,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 8]>() as wgpu::BufferAddress,
+                    shader_location: 7,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 12]>() as wgpu::BufferAddress,
+                    shader_location: 8,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 16]>() as wgpu::BufferAddress,
+                    shader_location: 9,
+                    format: wgpu::VertexFormat::Float32,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 17]>() as wgpu::BufferAddress,
+                    shader_location: 10,
+                    format: wgpu::VertexFormat::Float32,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 18]>() as wgpu::BufferAddress,
+                    shader_location: 11,
+                    format: wgpu::VertexFormat::Float32,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 19]>() as wgpu::BufferAddress,
+                    shader_location: 12,
+                    format: wgpu::VertexFormat::Float32,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 20]>() as wgpu::BufferAddress,
+                    shader_location: 13,
+                    format: wgpu::VertexFormat::Float32,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 21]>() as wgpu::BufferAddress,
+                    shader_location: 14,
+                    format: wgpu::VertexFormat::Float32,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 22]>() as wgpu::BufferAddress,
+                    shader_location: 15,
+                    format: wgpu::VertexFormat::Float32,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 23]>() as wgpu::BufferAddress,
+                    shader_location: 16,
+                    format: wgpu::VertexFormat::Float32,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 24]>() as wgpu::BufferAddress,
+                    shader_location: 17,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+            ],
+        }
+    }
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct GratingParams {
     pub sf: f32,
     pub tf: f32,
     pub phase: f32,
@@ -19,9 +121,9 @@ struct GratingParamsUniform {
     pub color: [f32; 4],
 }
 
-impl GratingParamsUniform {
+impl GratingParams {
     fn new() -> Self {
-        GratingParamsUniform {
+        GratingParams {
             sf: 5.0,
             tf: 1.0,
             phase: 0.0,
@@ -37,14 +139,16 @@ impl GratingParamsUniform {
     pub fn tick(&mut self) {
         self.tick += 1.0 / 60.0;
         self.phase = self.tf * self.tick;
+        if self.contrast < 0.5 {
+            self.contrast += 0.001;
+        } else {
+            self.contrast = 0.0;
+        }
     }
 }
 
 pub struct Grating {
     render_pipeline: wgpu::RenderPipeline,
-    gratingp_uniform: GratingParamsUniform,
-    gratingp_buffer: wgpu::Buffer,
-    gratingp_bind_group: wgpu::BindGroup,
     // for vertices
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
@@ -55,47 +159,13 @@ pub struct Grating {
 }
 
 impl Grating {
-    pub fn new(
-        device: &wgpu::Device,
-        proj_bind_group_layout: &wgpu::BindGroupLayout,
-    ) -> Self {
+    pub fn new(device: &wgpu::Device, proj_bind_group_layout: &wgpu::BindGroupLayout) -> Self {
         let shader = device.create_shader_module(include_wgsl!("grating.wgsl"));
-
-        let gratingp_uniform = GratingParamsUniform::new();
-        let gratingp_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Grating Params Buffer"),
-            contents: bytemuck::cast_slice(&[gratingp_uniform]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let gratingp_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-                label: Some("gratingp_bind_group_layout"),
-            });
-
-        let gratingp_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &gratingp_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: gratingp_buffer.as_entire_binding(),
-            }],
-            label: Some("gratingp_bind_group"),
-        });
 
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[&gratingp_bind_group_layout, &proj_bind_group_layout],
+                bind_group_layouts: &[&proj_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
@@ -137,7 +207,9 @@ impl Grating {
             multiview: None,
         });
 
-        let (v, idx) = create_vertices(gratingp_uniform.diameter);
+        let gratingp = GratingParams::new();
+        // todo: diameter is also instance var, but currently it is shared across all instances.
+        let (v, idx) = create_vertices(gratingp.diameter);
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Vertex Buffer"),
             contents: bytemuck::cast_slice(&v),
@@ -162,7 +234,14 @@ impl Grating {
                     cgmath::Vector3::unit_z(),
                     cgmath::Deg(0.0 * x as f32),
                 );
-                Instance { position, rotation }
+                let mut params = GratingParams::new();
+                params.sf *= (x + 3) as f32 / 2.0f32;
+                params.tf *= (x + 3) as f32 / 2.0f32;
+                Instance {
+                    position,
+                    rotation,
+                    params,
+                }
             })
             .collect::<Vec<_>>();
         let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
@@ -174,9 +253,6 @@ impl Grating {
 
         Grating {
             render_pipeline,
-            gratingp_uniform,
-            gratingp_buffer,
-            gratingp_bind_group,
             vertex_buffer,
             index_buffer,
             num_indices,
@@ -186,13 +262,9 @@ impl Grating {
     }
 
     pub fn update(&mut self, queue: &wgpu::Queue) {
-        self.gratingp_uniform.tick();
-
-        queue.write_buffer(
-            &self.gratingp_buffer,
-            0,
-            bytemuck::cast_slice(&[self.gratingp_uniform]),
-        );
+        for instance in self.instances.iter_mut() {
+            instance.params.tick();
+        }
 
         let instance_data = self
             .instances
@@ -215,8 +287,7 @@ impl Grating {
         'a: 'encoder,
     {
         rpass.set_pipeline(&self.render_pipeline);
-        rpass.set_bind_group(0, &self.gratingp_bind_group, &[]);
-        rpass.set_bind_group(1, proj_bind_group, &[]);
+        rpass.set_bind_group(0, proj_bind_group, &[]);
         rpass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         rpass.set_vertex_buffer(1, self.instance_buffer.slice(..));
         rpass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
