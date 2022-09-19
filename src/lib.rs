@@ -22,6 +22,7 @@ mod stim;
 use stim::{
     grating::{Grating, GratingParams},
     rect::Rect,
+    Stim,
 };
 
 mod vertex;
@@ -94,10 +95,6 @@ struct App {
     proj: Projection,
     proj_buffer: wgpu::Buffer,
     proj_bind_group: wgpu::BindGroup,
-    // texture
-    #[allow(dead_code)]
-    texture: texture::Texture,
-    texture_bind_group: wgpu::BindGroup,
     // imgui
     pub imgui: Context,
     pub platform: WinitPlatform,
@@ -206,47 +203,6 @@ impl App {
 
         let last_cursor = None;
 
-        let texture =
-            resources::load_texture("macaque.jpg", &device, &queue).expect("Failed to load image.");
-
-        let texture_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
-                        count: None,
-                    },
-                ],
-                label: Some("texture_bind_group_layout"),
-            });
-
-        let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &texture_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&texture.sampler),
-                },
-            ],
-            label: Some("texture_bind_group"),
-        });
-
         let proj = Projection::new(size.width as f32 / size.height as f32);
         let proj_uniform = proj.to_raw();
         let proj_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -292,7 +248,19 @@ impl App {
             ),
         };
         let grating = Grating::new(&device, &proj_bind_group_layout, instance);
-        let rect = Rect::new(&device, &proj_bind_group_layout);
+
+        let instance = Instance {
+            position: cgmath::Vector3 {
+                x: 1.0 / 2.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            rotation: cgmath::Quaternion::from_axis_angle(
+                cgmath::Vector3::unit_z(),
+                cgmath::Deg(30.0),
+            ),
+        };
+        let rect = Rect::new(&device, &proj_bind_group_layout, instance);
 
         App {
             surface,
@@ -304,8 +272,6 @@ impl App {
             proj,
             proj_buffer,
             proj_bind_group,
-            texture,
-            texture_bind_group,
             imgui,
             platform,
             renderer,

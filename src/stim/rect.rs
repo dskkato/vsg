@@ -1,9 +1,10 @@
-use cgmath::prelude::*;
 use wgpu::include_wgsl;
 use wgpu::util::DeviceExt;
 
 use crate::vertex::Vertex;
 use crate::{Instance, InstanceRaw};
+
+use super::{Stim, Visibility};
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -44,57 +45,30 @@ fn create_vertices(a: f32, b: f32) -> (Vec<Vertex>, Vec<u16>) {
 
 pub struct Rect {
     render_pipeline: wgpu::RenderPipeline,
-    rectp_uniform: RectParams,
-    rectp_buffer: wgpu::Buffer,
-    rectp_bind_group: wgpu::BindGroup,
     // for vertices
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     num_indices: u32,
     // for each instance
-    instances: Vec<Instance>,
+    instance: Instance,
     instance_buffer: wgpu::Buffer,
+    visible: Visibility,
 }
 
 impl Rect {
-    pub fn new(device: &wgpu::Device, proj_bind_group_layout: &wgpu::BindGroupLayout) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        proj_bind_group_layout: &wgpu::BindGroupLayout,
+        instance: Instance,
+    ) -> Self {
         let shader = device.create_shader_module(include_wgsl!("rect.wgsl"));
 
         let rectp_uniform = RectParams::new();
-        let rectp_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Rect Params Buffer"),
-            contents: bytemuck::cast_slice(&[rectp_uniform]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let rectp_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-                label: Some("gratingp_bind_group_layout"),
-            });
-
-        let rectp_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &rectp_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: rectp_buffer.as_entire_binding(),
-            }],
-            label: Some("rectp_bind_group"),
-        });
 
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[&rectp_bind_group_layout, &proj_bind_group_layout],
+                bind_group_layouts: &[&proj_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
@@ -149,44 +123,30 @@ impl Rect {
         });
         let num_indices = idx.len() as u32;
 
-        let instances = (-1..2)
-            .step_by(2)
-            .map(|x| {
-                let position = cgmath::Vector3 {
-                    x: x as f32 / 2.0,
-                    y: 0.0,
-                    z: 1.0f32,
-                };
-                let rotation = cgmath::Quaternion::from_axis_angle(
-                    cgmath::Vector3::unit_z(),
-                    cgmath::Deg(0.0 * x as f32),
-                );
-                Instance { position, rotation }
-            })
-            .collect::<Vec<_>>();
-        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
+        let instance_data = [instance.to_raw()];
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Instance Buffer"),
             contents: bytemuck::cast_slice(&instance_data),
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
 
+        let visible = Visibility::Visible;
+
         Rect {
             render_pipeline,
-            rectp_uniform,
-            rectp_buffer,
-            rectp_bind_group,
             vertex_buffer,
             index_buffer,
             num_indices,
-            instances,
+            instance,
             instance_buffer,
+            visible,
         }
     }
+}
 
-    pub fn update(&mut self, queue: &wgpu::Queue) {
-        let instance_data = self
-            .instances
+impl Stim for Rect {
+    fn update(&mut self, queue: &wgpu::Queue) {
+        let instance_data = [self.instance]
             .iter()
             .map(Instance::to_raw)
             .collect::<Vec<_>>();
@@ -198,19 +158,27 @@ impl Rect {
         );
     }
 
-    pub fn draw<'a, 'encoder>(
+    fn draw<'a, 'encoder>(
         &'a self,
         rpass: &mut wgpu::RenderPass<'encoder>,
         proj_bind_group: &'encoder wgpu::BindGroup,
     ) where
         'a: 'encoder,
     {
-        rpass.set_pipeline(&self.render_pipeline);
-        rpass.set_bind_group(0, &self.rectp_bind_group, &[]);
-        rpass.set_bind_group(1, proj_bind_group, &[]);
-        rpass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-        rpass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-        rpass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-        rpass.draw_indexed(0..self.num_indices, 0, 0..self.instances.len() as u32);
+        match self.visible {
+            Visibility::Visible => {
+                rpass.set_pipeline(&self.render_pipeline);
+                rpass.set_bind_group(0, proj_bind_group, &[]);
+                rpass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                rpass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+                rpass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                rpass.draw_indexed(0..self.num_indices, 0, 0..1);
+            }
+            Visibility::Hidden => {}
+        }
+    }
+
+    fn visibility(&mut self, visible: Visibility) {
+        self.visible = visible;
     }
 }

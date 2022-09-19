@@ -4,6 +4,8 @@ use wgpu::util::DeviceExt;
 use crate::vertex::Vertex;
 use crate::{create_vertices, Instance};
 
+use super::{Stim, Visibility};
+
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct InstanceRaw {
@@ -96,6 +98,7 @@ pub struct Grating {
     params: GratingParams,
     params_buffer: wgpu::Buffer,
     params_bind_group: wgpu::BindGroup,
+    visible: Visibility,
 }
 
 impl Grating {
@@ -202,6 +205,8 @@ impl Grating {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
 
+        let visible = Visibility::Visible;
+
         Grating {
             render_pipeline,
             vertex_buffer,
@@ -212,13 +217,8 @@ impl Grating {
             params,
             params_buffer,
             params_bind_group,
+            visible,
         }
-    }
-
-    pub fn update(&mut self, queue: &wgpu::Queue) {
-        self.params.tick();
-
-        queue.write_buffer(&self.params_buffer, 0, bytemuck::cast_slice(&[self.params]));
     }
 
     pub fn update_params(
@@ -243,20 +243,37 @@ impl Grating {
         };
         queue.write_buffer(&self.params_buffer, 0, bytemuck::cast_slice(&[self.params]));
     }
+}
 
-    pub fn draw<'a, 'encoder>(
+impl Stim for Grating {
+    fn update(&mut self, queue: &wgpu::Queue) {
+        self.params.tick();
+
+        queue.write_buffer(&self.params_buffer, 0, bytemuck::cast_slice(&[self.params]));
+    }
+
+    fn draw<'a, 'encoder>(
         &'a self,
         rpass: &mut wgpu::RenderPass<'encoder>,
         proj_bind_group: &'encoder wgpu::BindGroup,
     ) where
         'a: 'encoder,
     {
-        rpass.set_pipeline(&self.render_pipeline);
-        rpass.set_bind_group(0, proj_bind_group, &[]);
-        rpass.set_bind_group(1, &self.params_bind_group, &[]);
-        rpass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-        rpass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-        rpass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-        rpass.draw_indexed(0..self.num_indices, 0, 0..1);
+        match self.visible {
+            Visibility::Visible => {
+                rpass.set_pipeline(&self.render_pipeline);
+                rpass.set_bind_group(0, proj_bind_group, &[]);
+                rpass.set_bind_group(1, &self.params_bind_group, &[]);
+                rpass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                rpass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+                rpass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                rpass.draw_indexed(0..self.num_indices, 0, 0..1);
+            }
+            Visibility::Hidden => {}
+        }
+    }
+
+    fn visibility(&mut self, visible: Visibility) {
+        self.visible = visible;
     }
 }
