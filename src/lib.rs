@@ -1,7 +1,9 @@
+use std::{iter, time::Instant};
+
+use cgmath::prelude::*;
 use imgui::*;
 use imgui_wgpu::{Renderer, RendererConfig};
 use imgui_winit_support::WinitPlatform;
-use std::{iter, time::Instant};
 use wgpu::util::DeviceExt;
 use winit::{
     dpi::PhysicalSize,
@@ -17,12 +19,16 @@ mod resources;
 mod texture;
 
 mod stim;
-use stim::{grating::Grating, rect::Rect};
+use stim::{
+    grating::{Grating, GratingParams},
+    rect::Rect,
+};
 
 mod vertex;
 use vertex::Vertex;
 
-struct Instance {
+#[derive(Copy, Clone, PartialEq)]
+pub struct Instance {
     position: cgmath::Vector3<f32>,
     rotation: cgmath::Quaternion<f32>,
 }
@@ -274,7 +280,18 @@ impl App {
         });
 
         let bg_color = [0.5, 0.5, 0.5, 1.0];
-        let grating = Grating::new(&device, &proj_bind_group_layout);
+        let instance = Instance {
+            position: cgmath::Vector3 {
+                x: -1.0 / 2.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            rotation: cgmath::Quaternion::from_axis_angle(
+                cgmath::Vector3::unit_z(),
+                cgmath::Deg(0.0),
+            ),
+        };
+        let grating = Grating::new(&device, &proj_bind_group_layout, instance);
         let rect = Rect::new(&device, &proj_bind_group_layout);
 
         App {
@@ -313,19 +330,25 @@ impl App {
         }
     }
 
-    fn input(&mut self, _event: &WindowEvent) -> bool {
-        // match event {
-        //     WindowEvent::CursorMoved { position, .. } => {
-        //         self.instances[0].position.x =
-        //             ((position.x / self.size.width as f64) * 2.0 - 1.0) as f32;
-        //         self.instances[0].position.y = ((position.y / self.size.height as f64) * (-2.0)
-        //             + 1.0) as f32
-        //             * self.proj.aspect;
-        //         false
-        //     }
-        //     _ => false,
-        // }
-        false
+    fn input(&mut self, event: &WindowEvent) -> bool {
+        match event {
+            WindowEvent::CursorMoved { position, .. } => {
+                let x = ((position.x / self.size.width as f64) * 2.0 - 1.0) as f32;
+                let y = ((position.y / self.size.height as f64) * (-2.0) + 1.0) as f32
+                    * self.proj.aspect;
+                let instance = Instance {
+                    position: cgmath::Vector3 { x, y, z: 0.0 },
+                    rotation: cgmath::Quaternion::from_axis_angle(
+                        cgmath::Vector3::unit_z(),
+                        cgmath::Deg(0.0),
+                    ),
+                };
+                let params = GratingParams::new();
+                self.grating.update_params(&self.queue, instance, params);
+                false
+            }
+            _ => false,
+        }
     }
 
     fn update(&mut self) {

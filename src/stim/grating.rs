@@ -1,32 +1,13 @@
-use cgmath::prelude::*;
 use wgpu::include_wgsl;
 use wgpu::util::DeviceExt;
 
-use crate::create_vertices;
 use crate::vertex::Vertex;
-
-struct Instance {
-    position: cgmath::Vector3<f32>,
-    rotation: cgmath::Quaternion<f32>,
-    params: GratingParams,
-}
-
-impl Instance {
-    fn to_raw(&self) -> InstanceRaw {
-        InstanceRaw {
-            model: (cgmath::Matrix4::from_translation(self.position)
-                * cgmath::Matrix4::from(self.rotation))
-            .into(),
-            params: self.params,
-        }
-    }
-}
+use crate::{create_vertices, Instance};
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct InstanceRaw {
     model: [[f32; 4]; 4],
-    params: GratingParams,
 }
 
 impl InstanceRaw {
@@ -58,58 +39,14 @@ impl InstanceRaw {
                     shader_location: 8,
                     format: wgpu::VertexFormat::Float32x4,
                 },
-                wgpu::VertexAttribute {
-                    offset: mem::size_of::<[f32; 16]>() as wgpu::BufferAddress,
-                    shader_location: 9,
-                    format: wgpu::VertexFormat::Float32,
-                },
-                wgpu::VertexAttribute {
-                    offset: mem::size_of::<[f32; 17]>() as wgpu::BufferAddress,
-                    shader_location: 10,
-                    format: wgpu::VertexFormat::Float32,
-                },
-                wgpu::VertexAttribute {
-                    offset: mem::size_of::<[f32; 18]>() as wgpu::BufferAddress,
-                    shader_location: 11,
-                    format: wgpu::VertexFormat::Float32,
-                },
-                wgpu::VertexAttribute {
-                    offset: mem::size_of::<[f32; 19]>() as wgpu::BufferAddress,
-                    shader_location: 12,
-                    format: wgpu::VertexFormat::Float32,
-                },
-                wgpu::VertexAttribute {
-                    offset: mem::size_of::<[f32; 20]>() as wgpu::BufferAddress,
-                    shader_location: 13,
-                    format: wgpu::VertexFormat::Float32,
-                },
-                wgpu::VertexAttribute {
-                    offset: mem::size_of::<[f32; 21]>() as wgpu::BufferAddress,
-                    shader_location: 14,
-                    format: wgpu::VertexFormat::Float32,
-                },
-                wgpu::VertexAttribute {
-                    offset: mem::size_of::<[f32; 22]>() as wgpu::BufferAddress,
-                    shader_location: 15,
-                    format: wgpu::VertexFormat::Float32,
-                },
-                wgpu::VertexAttribute {
-                    offset: mem::size_of::<[f32; 23]>() as wgpu::BufferAddress,
-                    shader_location: 16,
-                    format: wgpu::VertexFormat::Float32,
-                },
-                wgpu::VertexAttribute {
-                    offset: mem::size_of::<[f32; 24]>() as wgpu::BufferAddress,
-                    shader_location: 17,
-                    format: wgpu::VertexFormat::Float32x4,
-                },
             ],
         }
     }
 }
+
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct GratingParams {
+pub struct GratingParams {
     pub sf: f32,
     pub tf: f32,
     pub phase: f32,
@@ -122,7 +59,7 @@ struct GratingParams {
 }
 
 impl GratingParams {
-    fn new() -> Self {
+    pub fn new() -> Self {
         GratingParams {
             sf: 5.0,
             tf: 1.0,
@@ -154,18 +91,56 @@ pub struct Grating {
     index_buffer: wgpu::Buffer,
     num_indices: u32,
     // for each instance
-    instances: Vec<Instance>,
+    instance: Instance,
     instance_buffer: wgpu::Buffer,
+    params: GratingParams,
+    params_buffer: wgpu::Buffer,
+    params_bind_group: wgpu::BindGroup,
 }
 
 impl Grating {
-    pub fn new(device: &wgpu::Device, proj_bind_group_layout: &wgpu::BindGroupLayout) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        proj_bind_group_layout: &wgpu::BindGroupLayout,
+        instance: Instance,
+    ) -> Self {
         let shader = device.create_shader_module(include_wgsl!("grating.wgsl"));
+
+        let params = GratingParams::new();
+        let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Params Buffer"),
+            contents: bytemuck::cast_slice(&[params]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let params_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+                label: Some("params_bind_group_layout"),
+            });
+
+        let params_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &params_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: params_buffer.as_entire_binding(),
+            }],
+            label: Some("proj_bind_group"),
+        });
 
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[&proj_bind_group_layout],
+                bind_group_layouts: &[&proj_bind_group_layout, &params_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
@@ -207,9 +182,7 @@ impl Grating {
             multiview: None,
         });
 
-        let gratingp = GratingParams::new();
-        // todo: diameter is also instance var, but currently it is shared across all instances.
-        let (v, idx) = create_vertices(gratingp.diameter);
+        let (v, idx) = create_vertices(params.diameter);
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Vertex Buffer"),
             contents: bytemuck::cast_slice(&v),
@@ -222,29 +195,7 @@ impl Grating {
         });
         let num_indices = idx.len() as u32;
 
-        let instances = (-1..2)
-            .step_by(2)
-            .map(|x| {
-                let position = cgmath::Vector3 {
-                    x: x as f32 / 2.0,
-                    y: 0.0,
-                    z: 1.0f32,
-                };
-                let rotation = cgmath::Quaternion::from_axis_angle(
-                    cgmath::Vector3::unit_z(),
-                    cgmath::Deg(0.0 * x as f32),
-                );
-                let mut params = GratingParams::new();
-                params.sf *= (x + 3) as f32 / 2.0f32;
-                params.tf *= (x + 3) as f32 / 2.0f32;
-                Instance {
-                    position,
-                    rotation,
-                    params,
-                }
-            })
-            .collect::<Vec<_>>();
-        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
+        let instance_data = &[instance].iter().map(Instance::to_raw).collect::<Vec<_>>();
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Instance Buffer"),
             contents: bytemuck::cast_slice(&instance_data),
@@ -256,27 +207,41 @@ impl Grating {
             vertex_buffer,
             index_buffer,
             num_indices,
-            instances,
+            instance,
             instance_buffer,
+            params,
+            params_buffer,
+            params_bind_group,
         }
     }
 
     pub fn update(&mut self, queue: &wgpu::Queue) {
-        for instance in self.instances.iter_mut() {
-            instance.params.tick();
+        self.params.tick();
+
+        queue.write_buffer(&self.params_buffer, 0, bytemuck::cast_slice(&[self.params]));
+    }
+
+    pub fn update_params(
+        &mut self,
+        queue: &wgpu::Queue,
+        instance: Instance,
+        params: GratingParams,
+    ) {
+        if instance != self.instance {
+            self.instance = instance;
+            let instance_raw = instance.to_raw();
+            queue.write_buffer(
+                &self.instance_buffer,
+                0,
+                bytemuck::cast_slice(&[instance_raw]),
+            );
         }
 
-        let instance_data = self
-            .instances
-            .iter()
-            .map(Instance::to_raw)
-            .collect::<Vec<_>>();
-
-        queue.write_buffer(
-            &self.instance_buffer,
-            0,
-            bytemuck::cast_slice(&instance_data),
-        );
+        self.params = GratingParams {
+            tick: self.params.tick,
+            ..params
+        };
+        queue.write_buffer(&self.params_buffer, 0, bytemuck::cast_slice(&[self.params]));
     }
 
     pub fn draw<'a, 'encoder>(
@@ -288,9 +253,10 @@ impl Grating {
     {
         rpass.set_pipeline(&self.render_pipeline);
         rpass.set_bind_group(0, proj_bind_group, &[]);
+        rpass.set_bind_group(1, &self.params_bind_group, &[]);
         rpass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         rpass.set_vertex_buffer(1, self.instance_buffer.slice(..));
         rpass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-        rpass.draw_indexed(0..self.num_indices, 0, 0..self.instances.len() as u32);
+        rpass.draw_indexed(0..self.num_indices, 0, 0..1);
     }
 }
