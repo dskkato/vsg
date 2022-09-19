@@ -1,6 +1,6 @@
 pub mod grating;
-pub mod rect;
 pub mod rdk;
+pub mod rect;
 
 pub enum Visibility {
     Visible,

@@ -326,21 +326,7 @@ impl App {
                     },
                 ..
             } => {
-                let proj_bind_group_layout =
-                    self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                        entries: &[wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: wgpu::ShaderStages::VERTEX,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        }],
-                        label: Some("proj_bind_group_layout"),
-                    });
-                self.rdk = RandomDotKinematogram::new(&self.device, &proj_bind_group_layout);
+                self.rdk.reset(&self.queue);
                 false
             }
             _ => false,
@@ -356,6 +342,9 @@ impl App {
         let output = self.surface.get_current_texture()?;
         // just after flip swap chain
         let delta_s = self.last_frame.elapsed();
+        if delta_s.as_millis() > 20 {
+            log::info!("Frame fault.");
+        }
         let now = Instant::now();
         self.imgui.io_mut().update_delta_time(now - self.last_frame);
         self.last_frame = now;
