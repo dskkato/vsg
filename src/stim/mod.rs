@@ -1,4 +1,5 @@
 pub mod grating;
+pub mod picture;
 pub mod rdk;
 pub mod rect;
 

@@ -21,6 +21,7 @@ mod texture;
 mod stim;
 use stim::{
     grating::{Grating, GratingParams},
+    picture::Picture,
     rdk::RandomDotKinematogram,
     rect::Rect,
     Stim,
@@ -107,6 +108,7 @@ struct App {
     // rect
     rect: Rect,
     rdk: RandomDotKinematogram,
+    picture: Picture,
 }
 
 fn create_vertices(d: f32) -> (Vec<Vertex>, Vec<u16>) {
@@ -265,6 +267,26 @@ impl App {
         let rect = Rect::new(&device, &proj_bind_group_layout, instance);
         let rdk = RandomDotKinematogram::new(&device, &proj_bind_group_layout);
 
+        let instance = Instance {
+            position: cgmath::Vector3 {
+                x: 0.0,
+                y: 1.0 / 2.0,
+                z: 0.0,
+            },
+            rotation: cgmath::Quaternion::from_axis_angle(
+                cgmath::Vector3::unit_z(),
+                cgmath::Deg(-30.0),
+            ),
+        };
+        let picture = Picture::new(
+            &device,
+            &queue,
+            &proj_bind_group_layout,
+            instance,
+            "macaque.jpg",
+        )
+        .unwrap();
+
         App {
             surface,
             device,
@@ -283,6 +305,7 @@ impl App {
             grating,
             rect,
             rdk,
+            picture,
         }
     }
 
@@ -413,6 +436,7 @@ impl App {
             self.grating.draw(&mut render_pass, &self.proj_bind_group);
             self.rect.draw(&mut render_pass, &self.proj_bind_group);
             self.rdk.draw(&mut render_pass, &self.proj_bind_group);
+            self.picture.draw(&mut render_pass, &self.proj_bind_group);
 
             self.renderer
                 .render(ui.render(), &self.queue, &self.device, &mut render_pass)
