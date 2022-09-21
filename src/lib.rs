@@ -104,11 +104,7 @@ struct App {
     last_frame: Instant,
     last_cursor: Option<MouseCursor>,
     // grating
-    grating: Grating,
-    // rect
-    rect: Rect,
-    rdk: RandomDotKinematogram,
-    picture: Picture,
+    stimuli: Vec<Box<dyn Stim>>,
 }
 
 fn create_vertices(d: f32) -> (Vec<Vertex>, Vec<u16>) {
@@ -239,7 +235,8 @@ impl App {
             label: Some("proj_bind_group"),
         });
 
-        let bg_color = [0.5, 0.5, 0.5, 1.0];
+        let bg_color = [0.5, 0.6, 0.4, 1.0];
+        let mut stimuli = Vec::new();
         let instance = Instance {
             position: cgmath::Vector3 {
                 x: -1.0 / 2.0,
@@ -252,6 +249,7 @@ impl App {
             ),
         };
         let grating = Grating::new(&device, &proj_bind_group_layout, instance);
+        stimuli.push(Box::new(grating) as Box<dyn Stim>);
 
         let instance = Instance {
             position: cgmath::Vector3 {
@@ -264,8 +262,11 @@ impl App {
                 cgmath::Deg(30.0),
             ),
         };
+
         let rect = Rect::new(&device, &proj_bind_group_layout, instance);
+        stimuli.push(Box::new(rect) as Box<dyn Stim>);
         let rdk = RandomDotKinematogram::new(&device, &proj_bind_group_layout);
+        stimuli.push(Box::new(rdk) as Box<dyn Stim>);
 
         let instance = Instance {
             position: cgmath::Vector3 {
@@ -286,6 +287,7 @@ impl App {
             "macaque.jpg",
         )
         .unwrap();
+        stimuli.push(Box::new(picture) as Box<dyn Stim>);
 
         App {
             surface,
@@ -302,10 +304,7 @@ impl App {
             renderer,
             last_frame,
             last_cursor,
-            grating,
-            rect,
-            rdk,
-            picture,
+            stimuli,
         }
     }
 
@@ -337,7 +336,7 @@ impl App {
                     ),
                 };
                 let params = GratingParams::new();
-                self.grating.update_params(&self.queue, instance, params);
+                // self.grating.update_params(&self.queue, instance, params);
                 false
             }
             WindowEvent::KeyboardInput {
@@ -349,7 +348,9 @@ impl App {
                     },
                 ..
             } => {
-                self.rdk.reset(&self.queue);
+                for stim in self.stimuli.iter_mut() {
+                    stim.reset(&self.queue);
+                }
                 false
             }
             _ => false,
@@ -357,8 +358,9 @@ impl App {
     }
 
     fn update(&mut self) {
-        self.grating.update(&self.queue);
-        self.rdk.update(&self.queue);
+        for stim in self.stimuli.iter_mut() {
+            stim.update(&self.queue);
+        }
     }
 
     fn render(&mut self, window: &Window) -> Result<(), wgpu::SurfaceError> {
@@ -433,10 +435,9 @@ impl App {
                 depth_stencil_attachment: None,
             });
 
-            self.grating.draw(&mut render_pass, &self.proj_bind_group);
-            self.rect.draw(&mut render_pass, &self.proj_bind_group);
-            self.rdk.draw(&mut render_pass, &self.proj_bind_group);
-            self.picture.draw(&mut render_pass, &self.proj_bind_group);
+            for stim in &self.stimuli {
+                stim.draw(&mut render_pass, &self.proj_bind_group);
+            }
 
             self.renderer
                 .render(ui.render(), &self.queue, &self.device, &mut render_pass)

@@ -219,26 +219,6 @@ impl RandomDotKinematogram {
         }
     }
 
-    pub fn reset(&mut self, queue: &wgpu::Queue) {
-        for i in 0..self.instances.len() {
-            let x = i % 100;
-            let y = i / 100;
-            self.instances[i].position.x = x as f32 / 100.0 - 0.5;
-            self.instances[i].position.y = y as f32 / 100.0 - 0.5;
-        }
-        let instance_raw = self
-            .instances
-            .iter()
-            .map(Instance::to_raw)
-            .collect::<Vec<_>>();
-
-        queue.write_buffer(
-            &self.instance_buffer,
-            0,
-            bytemuck::cast_slice(&instance_raw),
-        );
-    }
-
     // pub fn update_params(
     //     &mut self,
     //     queue: &wgpu::Queue,
@@ -267,6 +247,26 @@ impl Stim for RandomDotKinematogram {
     fn update(&mut self, queue: &wgpu::Queue) {
         for instance in self.instances.iter_mut() {
             instance.position += instance.direction / 10.0;
+        }
+        let instance_raw = self
+            .instances
+            .iter()
+            .map(Instance::to_raw)
+            .collect::<Vec<_>>();
+
+        queue.write_buffer(
+            &self.instance_buffer,
+            0,
+            bytemuck::cast_slice(&instance_raw),
+        );
+    }
+
+    fn reset(&mut self, queue: &wgpu::Queue) {
+        for i in 0..self.instances.len() {
+            let x = i % 100;
+            let y = i / 100;
+            self.instances[i].position.x = x as f32 / 100.0 - 0.5;
+            self.instances[i].position.y = y as f32 / 100.0 - 0.5;
         }
         let instance_raw = self
             .instances

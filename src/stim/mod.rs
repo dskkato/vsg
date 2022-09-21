@@ -10,6 +10,8 @@ pub enum Visibility {
 
 pub trait Stim {
     fn update(&mut self, _queue: &wgpu::Queue) {}
+    fn reset(&mut self, _queue: &wgpu::Queue) {}
+    fn start(&mut self, _queue: &wgpu::Queue) {}
 
     fn draw<'a, 'encoder>(
         &'a self,
