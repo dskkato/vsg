@@ -56,7 +56,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let dist = distance(in.position, ctr);
     let delta = fwidth(dist);
-    let alpha = smoothstep(t.diameter-delta, t.diameter, dist);
-    let color = mix(vec4<f32>(in.color, 1.0), vec4<f32>(0.0,0.0,0.0,0.0), alpha);
+    let alpha = smoothstep(t.diameter - delta, t.diameter, dist);
+    let color = mix(vec4<f32>(in.color, 1.0), vec4<f32>(0.0, 0.0, 0.0, 0.0), alpha);
     return color;
 }
