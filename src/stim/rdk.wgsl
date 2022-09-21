@@ -54,9 +54,9 @@ var<uniform> t: RdkParams;
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let ctr = vec2<f32>(0.0, 0.0);
 
-    if (distance(in.position, ctr) < t.diameter) {
-        return vec4<f32>(in.color, 1.0);
-    } else {
-        return vec4<f32>(0.0, 0.0, 0.0, 0.0);
-    }
+    let dist = distance(in.position, ctr);
+    let delta = fwidth(dist);
+    let alpha = smoothstep(t.diameter-delta, t.diameter, dist);
+    let color = mix(vec4<f32>(in.color, 1.0), vec4<f32>(0.0,0.0,0.0,0.0), alpha);
+    return color;
 }
